@@ -1,0 +1,281 @@
+---
+layout: post
+title: "Using Python, Flask, and Angular to Build Modern Web Apps - Part 4"
+description: "Moving your code to the cloud"
+date: "2018-09-04 08:30"
+author:
+  name: "Douglas Slingerland"
+  url: "https://twitter.com/dudango"
+  website: "http://www.dudango.com"
+  mail: "douglas@dudango.com"
+  avatar: "https://twitter.com/https://twitter.com/dudango/profile_image?size=original"
+related:
+- 2017-11-15-an-example-of-all-possible-elements
+---
+
+**TL;DR:** Briefly describe what this article is about and what the reader will achieve/learn after reading it. Please,
+also provide the link to a GitHub repository that contains code related to this article.
+
+## The Second Most Important Title
+
+UIn this part of the series you will deploy your web application to the web using a free service called Heroku.  Heroku will host your application in the cloud with minimal configuration allowing it be accessed by anyone you share the link with.   
+
+After that, you will set up a separate staging and production environments to allow continued development without interrupting the production service. 
+
+You will separate the backend from the frontend and setup a pipeline to promote your development code from staging to production.  
+
+# Preperations:
+
+- Sign up for a [free Heroku Account](https://signup.heroku.com/dc)
+- Once you've created an account, [install the Heroku CLI client for your platform](https://devcenter.heroku.com/articles/getting-started-with-python#set-up)
+```sh
+# After installing, login using the CLI with 
+heroku login
+
+# prepare heroku for your code Navigate to your root folder where your git is initiated and run the following command 
+
+heroku create
+
+# rename heroku remote to match backend
+git remote rename heroku backend 
+```
+
+# Pushing your Postgres database to the cloud 
+The first step you will take is to move your database to the cloud 
+You are going to create an app to hold your database. 
+
+To migrate your previous database using Heroku CLI you will need to [install the CLI tools for postgres](https://postgresapp.com/documentation/cli-tools.html) 
+
+
+```sh
+# Setup new Postgres database on Heroku
+heroku addons:create heroku-postgresql:hobby-dev
+
+# Verify successful deployment , the field under : add-on is your database name
+heroku pg
+
+# Get your connection string with the following command, enter the name of your database you created earlier
+heroku pg:credentials:url DATABASENAME
+
+# migrate database from local to the prepared heroku postgresql database
+heroku pg:push SOURCE TARGET
+heroku pg:push postgresql://postgres:password@localhost:5432/postgres DATABASENAME
+```
+
+
+# Updating the backend
+You will need to make a few changes to the backend to reference the new database before deploying the code to the new heroku cloud platform. 
+
+```sh
+# add this import string to the bottom of your imports
+Import os 
+
+# replace these 5 lines
+db_url = 'localhost:5432'
+db_name = 'online-exam'
+db_user = 'postgres'
+db_password = '0NLIN3-ex4m'
+engine = create_engine(f'postgresql://{db_user}:{db_password}@{db_url}/{db_name}')
+
+# with these two lines
+DATABASE_URL=os.environ['DATABASE_URL']
+engine = create_engine(DATABASE_URL)
+```
+	
+
+From here on out, you're going to move away from bootstrap script and start using [Green Unicorn](http://gunicorn.org), a production web server gateway interface.
+
+```sh
+# change to your backend directory and install gunicorn. 
+cd backend
+pipenv install gunicorn
+```
+
+Heroku needs a [Procfile](https://devcenter.heroku.com/articles/procfile) to run, this tells the program what commands to execute when deployed to the Heroku platform. Create a Procfile in the root directory of your app for this (Procfile needs capital P)
+
+```sh
+cd backend
+touch Procfile
+```
+add this line to the Procfile
+
+```sh
+web:gunicorn--pythonpath./backend/srcmain:app
+```
+
+With these changes in place, you've configured the backend API to be accessible from the cloud, so it's a good time to save your work.  
+
+```sh
+git add . && git commit -m "configuring  the API with WSGI for Heroku deployment"
+```
+
+Now that you have made these changes, let's push your project to the Heroku platform.  
+
+# Pushing your Python backend to Heroku 
+
+Push your code to the heroku service and verify you can see data.
+```sh
+ git subtree --prefix backend push backend master
+
+# bring the service live
+heroku ps:scale web=1 --remote backend
+
+# check your program in the browser
+heroku open --remote backend
+```
+
+Notice you the web page will display Not Found since you have not yet configured a starter static page.   Attach /exams to the end of the URL to see the JSON data returned. 
+
+# Pushing your Angular frontend to the cloud (Heroku)
+
+Now that the backend is live, it's time to push the frontend so you can interact with the data.  There are a few changes that need to be made to the front-end code to prepare it for deployment.
+
+Add a post-install reference to your package.json under scripts 
+```sh
+"postinstall": "cd frontend && ng build --aot --prod"
+```
+Check your node and npm versions to add to the package.json file
+```sh
+ node -v 
+ npm -v 
+```
+Add this line with the respective versions from the previous step to your package.json file
+```sh
+"engines": {
+"node": "8.9.0",
+"npm": "6.4.0"
+}
+```
+
+Replace the API url with the newly formed backend URL to reference the new backend
+
+```sh 
+cd frontend/src/app/env.ts
+```  
+
+Prepare the frontend modules dependencies
+
+```sh
+# move to the front end
+cd frontend
+
+# prepare the frontend modules dependencies
+npm install enhanced-resolve@3.3.0 --save-dev
+
+#install the express server to host your serve the angular application
+npm install express path --save
+```
+Create a server.js file in the root of the application and paste this code 
+```sh
+touch server.js
+```
+Place this code into the server.js file 
+
+```sh
+const express = require('express');
+const path = require('path');
+const app = express();
+// Serve only the static files form the dist directory
+app.use(express.static(__dirname + '/dist/<name-of-app>'));
+app.get('/*', function(req,res) {
+res.sendFile(path.join(__dirname+'/dist/<name-of-app>/index.html'));
+});
+// Start the app by listening on the default Heroku port
+app.listen(process.env.PORT || 8080);
+```
+
+Now you need to stage a new heroku application to house the frontend code
+```sh
+# create a frontend application
+heroku create
+
+# link the app as a remote repository with the git link provided from previous command
+git remote add frontend APP_GIT_LINK
+
+# verify your remotes, you will see backend and frontend listed
+git remote -v 
+``` 
+The frontend will need a Procfile of to issue the startup command to get it running, create that now .
+
+```sh
+# move into the frontend directory
+cd frontend
+
+#create the Procfile
+touch Procfile
+```
+Update the Procfile with this line to start the frontend application
+
+```sh
+web: node server.js
+```
+
+The final touch we will need to allow login using Auth0 service. 
+
+Navigate to the settings for client redirect
+```sh
+cd frontend/src/app/app.module.ts
+```
+
+Change your redirectUri variable to reference the new URL.
+
+Navigate over to the auth0 application settings page and update the fields with your new frontend application url and allow the callback. 
+
+Now deploy the frontend and test to see it pulling the backend data from the API 
+
+```sh
+# push the frontend code
+git subtree --prefix  frontend push frontend master
+
+# verify the code is running
+heroku open --remote frontend 
+```
+
+Congratulations, you're in the cloud! 
+
+
+Now the application is live in the cloud, this is a good time to save. 
+```sh
+git Commit -m 'Pushing Angular frontend to the cloud with Heroku'
+```
+
+
+
+# [Deploying CI/CD with Heroku](https://www.heroku.com/continuous-integration)
+
+To turn on true CI and enable testing with Heroku you will need to pay a monthly fee, you will not be doing that today, however you will be staging the environment to prepare the pipelines and manually promote your application.
+
+```sh
+# create backend-dev app
+heroku create
+
+# add the new app to the remote repository
+git remote add backend-dev APP_GIT_URL
+
+
+# create a backend-pipeline, name it backend-pipline, select stagins when prompted
+heroku pipelines:create --app APP_NAME
+
+# add the production backend to the pipeline
+heroku pipelines:add backend-pipeline --app APP_NAME
+
+# push backend to dev backend
+git subtree --prefix backend push backend-dev master
+		
+# create a frontend-dev app
+heroku create
+
+# add the new app to the remote repository with a remote name of frontend-dev
+git remote add frontend-dev https://git.heroku.com/damp-sands-71717.git
+
+# create a pipeline for frontend, name it frontend-pipeline, selected staging when prompted
+heroku pipelines:create --app damp-sands-71717
+
+# add the production frontend to the pipeline, select production when prompted
+heroku pipelines:add frontend-pipeline --app APP_NAME
+
+#Push frontend to Dev Frontend
+git subtree --prefix frontend push frontend-dev master
+```
+
+
